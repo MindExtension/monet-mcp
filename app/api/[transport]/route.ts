@@ -1,5 +1,5 @@
 import { createMcpHandler } from "mcp-handler";
-import { ALL_TOOLS } from "@/src/tools";
+import { ALL_TOOLS, MCP_CONTENT } from "@/src/tools";
 
 const handler = createMcpHandler(
   (server) => {
@@ -26,6 +26,16 @@ const handler = createMcpHandler(
           headers = new Headers();
         }
         const result = await t.handler(args, { headers });
+        // If handler signals raw MCP content (e.g. binary file download), forward as-is.
+        if (
+          result &&
+          typeof result === "object" &&
+          (result as Record<string, unknown>)[MCP_CONTENT] === true
+        ) {
+          return {
+            content: (result as { content: unknown[] }).content as never,
+          };
+        }
         return {
           content: [
             {

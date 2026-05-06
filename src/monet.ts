@@ -37,12 +37,16 @@ function authHeader(c: MonetCreds): string {
   return "Basic " + Buffer.from(`${c.user}:${c.pass}`).toString("base64");
 }
 
-async function rawRequest(
+async function rawFetch(
   c: MonetCreds,
   method: string,
   path: string,
-  init: { params?: Record<string, string | number | boolean | undefined>; body?: unknown } = {},
-): Promise<{ status: number; text: string; json: unknown }> {
+  init: {
+    params?: Record<string, string | number | boolean | undefined>;
+    body?: unknown;
+    accept?: string;
+  } = {},
+): Promise<Response> {
   const url = new URL(`${c.baseUrl}${path}`);
   if (init.params) {
     for (const [k, v] of Object.entries(init.params)) {
@@ -50,15 +54,30 @@ async function rawRequest(
       url.searchParams.append(k, String(v));
     }
   }
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: authHeader(c),
-      Accept: "application/json",
-      ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-  });
+  const headers: Record<string, string> = {
+    Authorization: authHeader(c),
+    Accept: init.accept ?? "application/json",
+  };
+  let body: BodyInit | undefined;
+  if (init.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(init.body);
+  } else if (method === "PUT" || method === "POST") {
+    // Some Monet PUT endpoints (e.g. GetSalesInvoice, SetCompany, SetLanguage)
+    // require an explicit Content-Length: 0 even when there is no body. fetch()
+    // does not always send it for PUT with no body — force-set here.
+    headers["Content-Length"] = "0";
+  }
+  return fetch(url, { method, headers, body });
+}
+
+async function rawRequest(
+  c: MonetCreds,
+  method: string,
+  path: string,
+  init: { params?: Record<string, string | number | boolean | undefined>; body?: unknown } = {},
+): Promise<{ status: number; text: string; json: unknown }> {
+  const res = await rawFetch(c, method, path, init);
   const text = await res.text();
   let json: unknown = text;
   try {
@@ -110,6 +129,50 @@ export async function call<T = unknown>(
     throw new MonetError(r.status, r.text);
   }
   return r.json as T;
+}
+
+export interface BinaryResult {
+  contentType: string;
+  filename?: string;
+  bytes: Uint8Array;
+  base64: string;
+  sizeBytes: number;
+}
+
+/** Call a Monet endpoint that returns a binary file (e.g. PDF). */
+export async function callBinary(
+  c: MonetCreds,
+  method: string,
+  path: string,
+  init: { params?: Record<string, string | number | boolean | undefined> } = {},
+): Promise<BinaryResult> {
+  await ensureCompany(c);
+  const res = await rawFetch(c, method, path, { ...init, accept: "*/*" });
+  if (res.status === 401 || res.status === 403) {
+    throw new MonetError(
+      res.status,
+      await res.text(),
+      `Auth failed (HTTP ${res.status}). Check x-monet-user / x-monet-pass headers.`,
+    );
+  }
+  if (res.status >= 400) {
+    throw new MonetError(res.status, await res.text());
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+  let filename: string | undefined;
+  const cd = res.headers.get("content-disposition");
+  if (cd) {
+    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    if (m) filename = decodeURIComponent(m[1]);
+  }
+  return {
+    contentType,
+    filename,
+    bytes: buf,
+    base64: Buffer.from(buf).toString("base64"),
+    sizeBytes: buf.byteLength,
+  };
 }
 
 /** Pulls credentials from MCP request headers. */

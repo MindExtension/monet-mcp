@@ -9,7 +9,15 @@
  */
 
 import { z } from "zod";
-import { call, credsFromHeaders, MonetError } from "./monet";
+import { call, callBinary, credsFromHeaders, MonetError } from "./monet";
+
+/** Sentinel: when a tool handler returns this shape, the MCP route emits the
+ *  content array verbatim instead of stringifying. Use for binary downloads. */
+export const MCP_CONTENT = "__mcp_content__" as const;
+export interface RawMcpContent {
+  [MCP_CONTENT]: true;
+  content: unknown[];
+}
 
 type Headers_ = Headers;
 
@@ -482,13 +490,45 @@ const INVOICE_TOOLS: ToolDef[] = [
   {
     name: "get_sales_invoice_pdf",
     description:
-      "Grąžina pardavimo SF (PDF / dokumento turinį). / Fetch a sales invoice document.",
+      "Atsisiųsti pardavimo SF kaip PDF. Grąžina base64-encoded PDF + filename + dydį. MCP klientai (Claude Desktop, Cursor) gali parodyti / išsaugoti failą tiesiogiai. / Download a sales invoice as PDF.",
     schema: z.object({ invoiceId: z.string() }),
-    handler: wrap(async ({ invoiceId }, { headers }) =>
-      call(credsFromHeaders(headers), "PUT", "/GetSalesInvoice", {
-        params: { invoiceId },
-      }),
-    ),
+    handler: async ({ invoiceId }, { headers }) => {
+      try {
+        const r = await callBinary(
+          credsFromHeaders(headers),
+          "PUT",
+          "/GetSalesInvoice",
+          { params: { invoiceId } },
+        );
+        const filename = r.filename ?? `${invoiceId}.pdf`;
+        return {
+          [MCP_CONTENT]: true,
+          content: [
+            {
+              type: "text",
+              text: `Downloaded ${filename} — ${r.contentType}, ${r.sizeBytes} bytes`,
+            },
+            {
+              type: "resource",
+              resource: {
+                uri: `monet://invoice/${encodeURIComponent(filename)}`,
+                mimeType: r.contentType,
+                blob: r.base64,
+              },
+            },
+          ],
+        } as RawMcpContent;
+      } catch (e) {
+        return {
+          error:
+            e instanceof MonetError
+              ? `Monet API error ${e.status}: ${e.bodyText.slice(0, 500)}`
+              : e instanceof Error
+                ? e.message
+                : String(e),
+        };
+      }
+    },
   },
   {
     name: "get_cust_invoice_balance",

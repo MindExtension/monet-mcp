@@ -123,8 +123,9 @@ You can also call `get_company_list` (returns OTHER companies — the active one
 ### Purchases
 `post_purch`, `post_purch_service`
 
-### Invoices (read)
-`get_cust_invoice_list`, `get_vend_invoice_list`, `get_sales_invoice_pdf`, `get_cust_invoice_balance`, `get_vend_invoice_balance`
+### Invoices (read + PDF download)
+`get_cust_invoice_list`, `get_vend_invoice_list`, `get_cust_invoice_balance`, `get_vend_invoice_balance`,
+`get_sales_invoice_pdf` — returns the invoice as a base64-encoded PDF wrapped in an MCP `resource` content block. Most clients (Claude Desktop, Cursor) display it inline or let you save it directly.
 
 ### Company / Settings
 `get_company_list`, `get_company`, `set_company`, `get_currency_codes`, `get_tax_item_groups`, `get_locations`, `get_item_groups`, `get_item_types`, `get_ledger_list`, `get_dim_list`, `insert_dim`, `get_language`, `set_language`
