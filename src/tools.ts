@@ -101,11 +101,16 @@ const ITEM_TOOLS: ToolDef[] = [
   {
     name: "items_quantity",
     description:
-      "Prekių likučiai. / Item stock quantities. Optionally filter by itemId.",
-    schema: z.object({ itemId: z.string().optional() }),
-    handler: wrap(async ({ itemId }, { headers }) =>
+      "Prekių likučiai sandėliuose. / Item stock quantities. all=true grąžina ir nulinius likučius.",
+    schema: z.object({
+      all: z.boolean().optional().default(false),
+      showZero: z.boolean().optional().default(false),
+      page: z.number().int().optional().default(0),
+      size: z.number().int().optional().default(30),
+    }),
+    handler: wrap(async ({ all, showZero, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/ItemsQuantity", {
-        params: itemId ? { itemId } : undefined,
+        params: { _all: all, _showZero: showZero, _page: page, _size: size },
       }),
     ),
   },
@@ -133,11 +138,11 @@ const ITEM_TOOLS: ToolDef[] = [
   },
   {
     name: "delete_item",
-    description: "Ištrinti prekę. / Delete an item by ID.",
+    description: "Ištrinti prekę pagal ID. / Delete an item by ID.",
     schema: z.object({ itemId: z.string() }),
     handler: wrap(async ({ itemId }, { headers }) =>
       call(credsFromHeaders(headers), "DELETE", "/DeleteItem", {
-        params: { itemId },
+        params: { _id: itemId },
       }),
     ),
   },
@@ -149,64 +154,95 @@ const INVENTORY_TOOLS: ToolDef[] = [
   {
     name: "create_invent_journal",
     description:
-      "Sukuria sandėlio žurnalą (perkėlimui, nurašymui, gamybai). / Create an inventory journal (transfer, scrap, BOM).",
-    schema: z.object({}).passthrough(),
-    handler: wrap(async (body, { headers }) =>
-      call(credsFromHeaders(headers), "POST", "/CreateInventJournal", { body }),
+      "Sukuria sandėlio žurnalą. type: 0 = nurašymas, 2 = perkėlimas. Grąžina sukurto žurnalo numerį (pvz. IZ-000485). / Create an inventory journal. Returns the new journal ID.",
+    schema: z.object({
+      type: z.number().int().describe("0 = nurašymas/scrap, 2 = perkėlimas/transfer"),
+      name: z.string().optional().describe("Aprašymas"),
+    }),
+    handler: wrap(async ({ type, name }, { headers }) =>
+      call(credsFromHeaders(headers), "POST", "/CreateInventJournal", {
+        params: { type, name },
+      }),
     ),
   },
   {
     name: "create_invent_journal_line_acquisition_scrap",
     description:
-      "Įtraukia į žurnalą įsigijimo / nurašymo eilutę. / Add an acquisition / scrap line to an inventory journal.",
-    schema: z.object({}).passthrough(),
-    handler: wrap(async (body, { headers }) =>
-      call(credsFromHeaders(headers), "POST", "/CreateInventJournalLine", { body }),
+      "Pridėti įsigijimo / nurašymo eilutę į žurnalą. Body laukai: Date (Req), ItemId (Req), Location (Req, '' jei nepriskirtas), Qty, Amount (pajamavimo suma), LedgerAccount (Req DK sąskaita), Dim ([Padalinys, Projektas, Produktas]). / Add an acquisition / scrap line.",
+    schema: z
+      .object({
+        journalId: z.string(),
+        Date: z.string(),
+        ItemId: z.string(),
+        Location: z.string(),
+        LedgerAccount: z.string(),
+      })
+      .passthrough(),
+    handler: wrap(async ({ journalId, ...body }, { headers }) =>
+      call(credsFromHeaders(headers), "POST", "/CreateInventJournalLine", {
+        params: { journalId },
+        body,
+      }),
     ),
   },
   {
     name: "create_invent_journal_line_transfer",
     description:
-      "Įtraukia į žurnalą perkėlimo eilutę. / Add a transfer line to an inventory journal.",
-    schema: z.object({}).passthrough(),
-    handler: wrap(async (body, { headers }) =>
+      "Pridėti perkėlimo eilutę į žurnalą. Body laukai: Date, ItemId, Location, Qty, ToLocation (Req — sandėlis į kurį perkeliama), Dim. / Add a transfer line.",
+    schema: z
+      .object({
+        journalId: z.string(),
+        Date: z.string(),
+        ItemId: z.string(),
+        Location: z.string(),
+        ToLocation: z.string(),
+      })
+      .passthrough(),
+    handler: wrap(async ({ journalId, ...body }, { headers }) =>
       call(credsFromHeaders(headers), "POST", "/CreateInventJournalLine", {
+        params: { journalId },
         body,
-        params: { type: "transfer" },
       }),
     ),
   },
   {
     name: "create_invent_journal_line_bom",
     description:
-      "Įtraukia komplekto (BOM) eilutę. / Add a bill-of-materials line to an inventory journal.",
-    schema: z.object({}).passthrough(),
-    handler: wrap(async (body, { headers }) =>
+      "Pridėti komplekto (BOM) eilutę. Teigiamas Qty = gaminys, neigiamas = naudojama prekė. Body laukai: Date, ItemId, Location, Qty (Req), Dim. Komplektas iš 2 prekių reikalauja 3 eilučių. / Add a bill-of-materials line.",
+    schema: z
+      .object({
+        journalId: z.string(),
+        Date: z.string(),
+        ItemId: z.string(),
+        Location: z.string(),
+        Qty: z.number(),
+      })
+      .passthrough(),
+    handler: wrap(async ({ journalId, ...body }, { headers }) =>
       call(credsFromHeaders(headers), "POST", "/CreateInventJournalLine", {
+        params: { journalId },
         body,
-        params: { type: "bom" },
       }),
     ),
   },
   {
     name: "check_invent_journal",
     description:
-      "Patikrina sandėlio žurnalą prieš registravimą. / Validate an inventory journal before posting.",
-    schema: z.object({ journalNum: z.string() }),
-    handler: wrap(async ({ journalNum }, { headers }) =>
+      "Patikrina ar žurnalas užregistruotas. Grąžina 0 (neregistruotas) arba 1 (registruotas). / Check journal posted state.",
+    schema: z.object({ journalId: z.string() }),
+    handler: wrap(async ({ journalId }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/CheckInventJournal", {
-        params: { journalNum },
+        params: { journalId },
       }),
     ),
   },
   {
     name: "post_invent_journal",
-    description:
-      "Užregistruoja sandėlio žurnalą. / Post an inventory journal.",
-    schema: z.object({ journalNum: z.string() }),
-    handler: wrap(async ({ journalNum }, { headers }) =>
+    description: "Užregistruoja sandėlio žurnalą. / Post an inventory journal.",
+    schema: z.object({ journalId: z.string() }),
+    handler: wrap(async ({ journalId }, { headers }) =>
       call(credsFromHeaders(headers), "PUT", "/PostInventJournal", {
-        params: { journalNum },
+        params: { journalId },
       }),
     ),
   },
@@ -255,11 +291,11 @@ const CUST_TOOLS: ToolDef[] = [
   },
   {
     name: "delete_customer",
-    description: "Ištrinti klientą. / Delete a customer by ID.",
+    description: "Ištrinti klientą pagal ID. / Delete a customer by ID.",
     schema: z.object({ customerId: z.string() }),
     handler: wrap(async ({ customerId }, { headers }) =>
       call(credsFromHeaders(headers), "DELETE", "/DeleteCust", {
-        params: { customerId },
+        params: { _id: customerId },
       }),
     ),
   },
@@ -303,11 +339,11 @@ const VEND_TOOLS: ToolDef[] = [
   },
   {
     name: "delete_vendor",
-    description: "Ištrinti tiekėją. / Delete a vendor by ID.",
+    description: "Ištrinti tiekėją pagal ID. / Delete a vendor by ID.",
     schema: z.object({ vendorId: z.string() }),
     handler: wrap(async ({ vendorId }, { headers }) =>
       call(credsFromHeaders(headers), "DELETE", "/DeleteVend", {
-        params: { vendorId },
+        params: { _id: vendorId },
       }),
     ),
   },
@@ -365,10 +401,14 @@ const SALES_TOOLS: ToolDef[] = [
   {
     name: "post_sales_refund",
     description:
-      "Pardavimo grąžinimas pagal SF nr. / Issue a sales refund for an invoice.",
-    schema: z.object({
-      invoiceId: z.string(),
-    }).passthrough(),
+      "Pardavimo grąžinimas pagal SF nr. invoiceId — grąžinamos SF numeris. Body privalo CustomerId + SalesOrderLines[]. SalesType=4 (Grąžinta prekė) automatinis. / Issue a sales refund.",
+    schema: z
+      .object({
+        invoiceId: z.string().describe("Original invoice number being refunded"),
+        CustomerId: z.string(),
+        SalesOrderLines: z.array(lineSchema).min(1),
+      })
+      .passthrough(),
     handler: wrap(async ({ invoiceId, ...body }, { headers }) =>
       call(credsFromHeaders(headers), "POST", "/PostSalesRefunds", {
         params: { invoiceId },
@@ -412,16 +452,15 @@ const INVOICE_TOOLS: ToolDef[] = [
   {
     name: "get_cust_invoice_list",
     description:
-      "Pardavimų SF sąrašas (gali būti filtruojamas pagal datas). / List sales invoices.",
+      "Pardavimų SF sąrašas. Palaiko paiešką pagal SF nr. arba kliento pavadinimą + puslapiavimą. / List sales invoices (search by invoice number or customer name).",
     schema: z.object({
-      from: z.string().optional().describe("YYYY-MM-DD"),
-      to: z.string().optional().describe("YYYY-MM-DD"),
+      search: z.string().optional(),
       page: z.number().int().optional().default(0),
       size: z.number().int().optional().default(100),
     }),
-    handler: wrap(async ({ from, to, page, size }, { headers }) =>
+    handler: wrap(async ({ search, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetCustInvoiceList", {
-        params: { dateFrom: from, dateTo: to, _page: page, _size: size },
+        params: { _search: search, _page: page, _size: size },
       }),
     ),
   },
@@ -430,14 +469,13 @@ const INVOICE_TOOLS: ToolDef[] = [
     description:
       "Pirkimų SF sąrašas. / List vendor (purchase) invoices.",
     schema: z.object({
-      from: z.string().optional(),
-      to: z.string().optional(),
+      search: z.string().optional(),
       page: z.number().int().optional().default(0),
       size: z.number().int().optional().default(100),
     }),
-    handler: wrap(async ({ from, to, page, size }, { headers }) =>
+    handler: wrap(async ({ search, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetVendInvoiceList", {
-        params: { dateFrom: from, dateTo: to, _page: page, _size: size },
+        params: { _search: search, _page: page, _size: size },
       }),
     ),
   },
@@ -455,22 +493,28 @@ const INVOICE_TOOLS: ToolDef[] = [
   {
     name: "get_cust_invoice_balance",
     description:
-      "Kliento SF likutis (valiuta). / Customer invoice balance (currency).",
-    schema: z.object({ invoiceId: z.string() }),
-    handler: wrap(async ({ invoiceId }, { headers }) =>
+      "Konkrečios kliento SF likutis valiuta. Reikalauja kliento ID + SF nr. / Customer invoice balance.",
+    schema: z.object({
+      accountNum: z.string().describe("Customer ID"),
+      invoiceId: z.string(),
+    }),
+    handler: wrap(async ({ accountNum, invoiceId }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetCustInvoiceBalanceCur", {
-        params: { invoiceId },
+        params: { _accountNum: accountNum, _invoiceId: invoiceId },
       }),
     ),
   },
   {
     name: "get_vend_invoice_balance",
     description:
-      "Tiekėjo SF likutis (valiuta). / Vendor invoice balance (currency).",
-    schema: z.object({ invoiceId: z.string() }),
-    handler: wrap(async ({ invoiceId }, { headers }) =>
+      "Konkrečios tiekėjo SF likutis valiuta. Reikalauja tiekėjo ID + SF nr. / Vendor invoice balance.",
+    schema: z.object({
+      accountNum: z.string().describe("Vendor ID"),
+      invoiceId: z.string(),
+    }),
+    handler: wrap(async ({ accountNum, invoiceId }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetVendInvoiceBalanceCur", {
-        params: { invoiceId },
+        params: { _accountNum: accountNum, _invoiceId: invoiceId },
       }),
     ),
   },
@@ -567,27 +611,30 @@ const COMPANY_TOOLS: ToolDef[] = [
   {
     name: "get_dim_list",
     description:
-      "Požymių (Dim) sąrašas: padaliniai / projektai / produktai. / Dimensions list (departments / projects / products).",
+      "Požymių (Dim) sąrašas. type: 0=Padalinys, 1=Projektas, 2=Produktas. / Dimensions list (departments / projects / products).",
     schema: z.object({
-      type: z
-        .number()
-        .int()
-        .min(0)
-        .max(2)
-        .optional()
-        .describe("0=Padalinys, 1=Projektas, 2=Produktas"),
+      type: z.number().int().min(0).max(2).default(0),
+      search: z.string().optional(),
+      page: z.number().int().optional().default(0),
+      size: z.number().int().optional().default(30),
     }),
-    handler: wrap(async ({ type }, { headers }) =>
+    handler: wrap(async ({ type, search, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetDimList", {
-        params: type !== undefined ? { type } : undefined,
+        params: { _type: type, _search: search, _page: page, _size: size },
       }),
     ),
   },
   {
     name: "insert_dim",
     description:
-      "Sukurti naują požymį (padalinį / projektą / produktą). / Create a new dimension value.",
-    schema: z.object({}).passthrough(),
+      "Sukurti naują požymį. Type: 0=Padalinys, 1=Projektas, 2=Produktas. Id ir Name privalomi. / Create a new dimension value.",
+    schema: z
+      .object({
+        Type: z.number().int().min(0).max(2),
+        Id: z.string(),
+        Name: z.string(),
+      })
+      .passthrough(),
     handler: wrap(async (body, { headers }) =>
       call(credsFromHeaders(headers), "POST", "/InsertDim", { body }),
     ),
@@ -603,10 +650,10 @@ const COMPANY_TOOLS: ToolDef[] = [
   {
     name: "set_language",
     description: "Pakeisti sistemos kalbą. / Set UI language.",
-    schema: z.object({ language: z.string().describe("e.g. lt-LT, en-US") }),
+    schema: z.object({ language: z.string().describe("e.g. lt, en") }),
     handler: wrap(async ({ language }, { headers }) =>
       call(credsFromHeaders(headers), "PUT", "/SetLanguage", {
-        params: { language },
+        params: { _language: language },
       }),
     ),
   },
@@ -647,42 +694,52 @@ const PAYMENT_TOOLS: ToolDef[] = [
   {
     name: "get_cust_open_payments",
     description:
-      "Klientų neapmokėtos sąskaitos. / Customer open (unpaid) invoices / payments.",
-    schema: z.object({ custId: z.string().optional() }),
-    handler: wrap(async ({ custId }, { headers }) =>
+      "Konkretaus kliento neapmokėtos sąskaitos. accountNum yra kliento ID (CustomerId). / Open (unpaid) invoices for a specific customer.",
+    schema: z.object({
+      accountNum: z.string().describe("Customer ID (e.g. 'Aroja')"),
+      page: z.number().int().optional().default(0),
+      size: z.number().int().optional().default(300),
+    }),
+    handler: wrap(async ({ accountNum, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetCustOpenPayments", {
-        params: custId ? { custId } : undefined,
+        params: { _accountNum: accountNum, _page: page, _size: size },
       }),
     ),
   },
   {
     name: "get_cust_balance",
-    description: "Kliento balansas. / Customer balance.",
-    schema: z.object({ custId: z.string().optional() }),
-    handler: wrap(async ({ custId }, { headers }) =>
+    description:
+      "Konkretaus kliento balansas. accountNum yra kliento ID. / Balance for a specific customer.",
+    schema: z.object({ accountNum: z.string() }),
+    handler: wrap(async ({ accountNum }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetCustBalance", {
-        params: custId ? { custId } : undefined,
+        params: { _accountNum: accountNum },
       }),
     ),
   },
   {
     name: "get_vend_balance",
-    description: "Tiekėjo balansas. / Vendor balance.",
-    schema: z.object({ vendId: z.string().optional() }),
-    handler: wrap(async ({ vendId }, { headers }) =>
+    description:
+      "Konkretaus tiekėjo balansas. accountNum yra tiekėjo ID. / Balance for a specific vendor.",
+    schema: z.object({ accountNum: z.string() }),
+    handler: wrap(async ({ accountNum }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetVendBalance", {
-        params: vendId ? { vendId } : undefined,
+        params: { _accountNum: accountNum },
       }),
     ),
   },
   {
     name: "get_vend_open_payments",
     description:
-      "Tiekėjams neapmokėtos sąskaitos. / Vendor open (unpaid) invoices / payments.",
-    schema: z.object({ vendId: z.string().optional() }),
-    handler: wrap(async ({ vendId }, { headers }) =>
+      "Konkretaus tiekėjo neapmokėtos sąskaitos. accountNum yra tiekėjo ID. / Open (unpaid) invoices for a specific vendor.",
+    schema: z.object({
+      accountNum: z.string(),
+      page: z.number().int().optional().default(0),
+      size: z.number().int().optional().default(300),
+    }),
+    handler: wrap(async ({ accountNum, page, size }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetVendOpenPayments", {
-        params: vendId ? { vendId } : undefined,
+        params: { _accountNum: accountNum, _page: page, _size: size },
       }),
     ),
   },
@@ -694,13 +751,21 @@ const EMPLOYEE_TOOLS: ToolDef[] = [
   {
     name: "get_company_worker_timetable",
     description:
-      "Darbo laiko apskaita (tabelis). / Employee timetable for the company.",
+      "Darbo laiko apskaita (tabelis) konkrečiai įmonei. companyCode = įmonės kodas (pvz. '301844037'). agreementId = vienas arba keli sutarties ID, atskirti kableliais (pvz. 'D_004,D_005'). / Employee timetable.",
     schema: z.object({
-      month: z.string().optional().describe("YYYY-MM"),
+      companyCode: z.string().describe("Company registration code"),
+      agreementId: z.string().describe("Agreement ID(s), comma-separated"),
+      dateFrom: z.string().describe("YYYY-MM-DD"),
+      dateTo: z.string().describe("YYYY-MM-DD"),
     }),
-    handler: wrap(async ({ month }, { headers }) =>
+    handler: wrap(async ({ companyCode, agreementId, dateFrom, dateTo }, { headers }) =>
       call(credsFromHeaders(headers), "GET", "/GetCompanyWorkerTimeTable", {
-        params: month ? { month } : undefined,
+        params: {
+          _companyCode: companyCode,
+          _agreementId: agreementId,
+          _dateFrom: dateFrom,
+          _dateTo: dateTo,
+        },
       }),
     ),
   },
