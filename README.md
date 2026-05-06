@@ -13,12 +13,12 @@ Multi-tenant **Model Context Protocol** server for **MonetAPI v2** (Lithuanian b
 
 ### One-click
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USER/monet-mcp)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FMindExtension%2Fmonet-mcp)
 
 ### Manual
 
 ```bash
-git clone https://github.com/YOUR_USER/monet-mcp
+git clone https://github.com/MindExtension/monet-mcp
 cd monet-mcp
 pnpm install        # or npm / yarn
 vercel              # link to a new Vercel project
