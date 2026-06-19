@@ -395,11 +395,23 @@ const SALES_TOOLS: ToolDef[] = [
   {
     name: "post_sales_service",
     description:
-      "Sukurti paslaugų pardavimo sąskaitą. Required: CustomerId, SalesOrderLines[]. / Create a services sales invoice.",
+      "Sukurti paslaugų pardavimo SF su laisvomis eilutėmis (be privalomo Item kodo). Eilutė: Name, Qty, Amount, LedgerAccount (DK sąsk. Id, pvz. 5001 Suteiktų paslaugų pajamos), TaxItemGroup. Top: CustomerId (Req), Date, DueDate, Currency, InvoiceId, Notes, FullAmount, FullTax, InclTax, SkipPost (true=neregistruota išankstinė), DeliveryCountry, Dim. / Create a services sales invoice with free-form lines (no Item ID required).",
     schema: z
       .object({
         CustomerId: z.string(),
-        SalesOrderLines: z.array(lineSchema).min(1),
+        SalesServiceLines: z
+          .array(
+            z
+              .object({
+                Name: z.string().optional(),
+                Qty: z.number().optional(),
+                Amount: z.number().optional(),
+                LedgerAccount: z.string().optional(),
+                TaxItemGroup: z.string().optional(),
+              })
+              .passthrough(),
+          )
+          .min(1),
       })
       .passthrough(),
     handler: wrap(async (body, { headers }) =>
